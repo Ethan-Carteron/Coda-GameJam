@@ -227,9 +227,8 @@ export class Game extends Phaser.Scene {
             
             bomb.setTexture(b.texture);
             bomb.enableBody(true, b.x, b.y, true, true);
-            bomb.setScale(0.3);
-            bomb.setCircle(14);
-            bomb.setBounce(1).setVelocity(b.vx, b.vy);
+            this.setupBomb(bomb);
+            bomb.setVelocity(b.vx, b.vy);
         });
     }
 
@@ -390,13 +389,34 @@ export class Game extends Phaser.Scene {
             const x = (this.player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
             
             // C'est ici que tu peux changer la logique des bombes facilement :
-            const bombKey = `bomb${Phaser.Math.Between(1, 4)}`;
+            const bombKey = `bomb${Phaser.Math.Between(1, 2)}`;
             
             const bomb = this.bombs.create(x, 16, bombKey);
-            bomb.setScale(0.3);
-            bomb.setCircle(14);
-            bomb.setBounce(1).setCollideWorldBounds(true).setVelocity(Phaser.Math.Between(-200, 200), 20);
+            this.setupBomb(bomb);
+            bomb.setCollideWorldBounds(true).setVelocity(Phaser.Math.Between(-200, 200), 20);
         }
+    }
+
+    setupBomb(bomb: Phaser.Physics.Arcade.Sprite) {
+        const texture = bomb.texture.key;
+        
+        // On ajuste le scale pour que tout le monde ait la même taille que bomb1 à 0.3
+        // bomb1 (351x217) -> scale 0.3 => ~105px
+        // bomb2 (500x500) -> scale 0.21 => ~105px
+        if (texture === 'bomb1') {
+            bomb.setScale(0.3);
+            bomb.setCircle(60, 110, 40); // Ajusté pour le visage sur bomb1
+        } else if (texture === 'bomb2') {
+            bomb.setScale(0.21);
+            bomb.setCircle(200, 50, 40); // Ajusté pour le visage sur bomb2
+        } else {
+            // Par défaut pour bomb3, bomb4 si elles arrivent
+            bomb.setScale(0.3);
+            bomb.setCircle(bomb.width / 4, bomb.width / 4, bomb.height / 4);
+        }
+        
+        (bomb.body as Phaser.Physics.Arcade.Body).updateFromGameObject();
+        bomb.setBounce(1);
     }
 
     hitBomb() {

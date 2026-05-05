@@ -46,6 +46,9 @@ export class Game extends Phaser.Scene {
     init(data: { socket: Socket, roomCode: string }) {
         this.socket = data.socket;
         this.roomCode = data.roomCode;
+        this.gameOver = false;
+        this.isSpectator = false;
+        this.health = 3;
     }
 
     preload() {
@@ -144,7 +147,7 @@ export class Game extends Phaser.Scene {
         this.socket.on('collectStarAt', (index) => {
             if (this.isHost) {
                 const star = this.stars.getChildren()[index] as Phaser.Physics.Arcade.Sprite;
-                if (star && star.active) {
+                if (star) {
                     this.collectStar(null, star);
                 }
             }
@@ -223,15 +226,15 @@ export class Game extends Phaser.Scene {
             let star = currentStars[index] as Phaser.Physics.Arcade.Sprite;
             if (!star) {
                 star = this.stars.create(s.x, s.y, 'star');
-            } else {
-                star.enableBody(true, s.x, s.y, true, true);
             }
-            star.setBounceY(s.bounceY);
+            
+            if (s.active) {
+                star.enableBody(true, s.x, s.y, true, true);
+                star.setBounceY(s.bounceY);
+            } else {
+                star.disableBody(true, true);
+            }
         });
-        
-        for (let i = data.stars.length; i < currentStars.length; i++) {
-            (currentStars[i] as Phaser.Physics.Arcade.Sprite).disableBody(true, true);
-        }
 
         const currentBombs = this.bombs.getChildren();
         data.bombs.forEach((b: any, index: number) => {
@@ -245,26 +248,30 @@ export class Game extends Phaser.Scene {
             bomb.setCollideWorldBounds(true);
             bomb.setVelocity(b.vx, b.vy);
         });
+        
+        for (let i = data.bombs.length; i < currentBombs.length; i++) {
+            (currentBombs[i] as Phaser.Physics.Arcade.Sprite).disableBody(true, true);
+        }
     }
 
     update() {
-        if (this.gameOver || this.isSpectator) return;
-
-        if (this.isImmune || this.isDashing) {
-            if (this.isImmune) {
-                this.player.setAlpha(0.5 + Math.sin(this.time.now / 100) * 0.5);
-                this.player.setVelocityX(0);
-            }
-        } else {
-            this.handleInput();
-        }
-
-        this.updateUI();
-        this.emitUpdate();
+        if (this.gameOver) return;
 
         if (this.isHost) {
             this.emitHostUpdate();
         }
+
+        if (!this.isSpectator) {
+            if (this.isImmune) {
+                this.player.setAlpha(0.5 + Math.sin(this.time.now / 100) * 0.5);
+                this.player.setVelocityX(0);
+            } else if (!this.isDashing) {
+                this.handleInput();
+            }
+            this.updateUI();
+        }
+
+        this.emitUpdate();
     }
 
     handleInput() {
@@ -297,9 +304,8 @@ export class Game extends Phaser.Scene {
     updateUI() {
         this.drawHearts(this.playerHearts, this.player.x, this.player.y - 40, this.health);
         this.playerNameTag.setPosition(this.player.x, this.player.y - 55);
-        
-        if (Math.abs(this.player.body!.velocity.x) > 10) {
-            this.player.setFlipX(this.player.body!.velocity.x < 0);
+        if (this.player.body && Math.abs(this.player.body.velocity.x) > 10) {
+            this.player.setFlipX(this.player.body.velocity.x < 0);
         }
     }
 
@@ -319,7 +325,7 @@ export class Game extends Phaser.Scene {
             x: this.player.x,
             y: this.player.y,
             flipX: this.player.flipX,
-            anim: this.player.anims.currentAnim?.key,
+            anim: this.player.anims.currentAnim ? this.player.anims.currentAnim.key : 'turn',
             isDashing: this.isDashing,
             health: this.health,
             isImmune: this.isImmune
@@ -327,9 +333,12 @@ export class Game extends Phaser.Scene {
     }
 
     emitHostUpdate() {
-        const starsData = this.stars.getChildren()
-            .map((s: any) => ({ x: s.x, y: s.y, bounceY: s.bounceY, active: s.active }))
-            .filter(s => s.active);
+        const starsData = this.stars.getChildren().map((s: any) => ({
+            x: s.x,
+            y: s.y,
+            bounceY: s.bounceY,
+            active: s.active
+        }));
             
         const bombsData = this.bombs.getChildren()
             .filter((b: any) => b.active)
@@ -358,13 +367,15 @@ export class Game extends Phaser.Scene {
 
     collectStar(_player: any, star: any) {
         if (!this.isHost) {
-            // Tell host we touched a star
             const index = this.stars.getChildren().indexOf(star);
-            this.socket.emit('starCollected', { roomCode: this.roomCode, starIndex: index });
-            star.disableBody(true, true); // Visual feedback immediate for client
+            if (index !== -1) {
+                this.socket.emit('starCollected', { roomCode: this.roomCode, starIndex: index });
+                star.disableBody(true, true);
+            }
             return;
         }
 
+        if (!star.active) return;
         star.disableBody(true, true);
         this.score += 10;
         this.scoreText.setText('Score: ' + this.score);
@@ -388,16 +399,12 @@ export class Game extends Phaser.Scene {
         this.player.setVelocity(0, 0);
 
         this.tweens.addCounter({
-            from: 255,
-            to: 0,
-            duration: 1000,
+            from: 255, to: 0, duration: 1000,
             onUpdate: (tween) => {
-                const value = Math.floor(tween.getValue());
-                this.player.setTint(Phaser.Display.Color.GetColor(255, 255 - value, 255 - value));
+                const val = Math.floor(tween.getValue());
+                this.player.setTint(Phaser.Display.Color.GetColor(255, 255 - val, 255 - val));
             },
-            onComplete: () => {
-                this.player.clearTint();
-            }
+            onComplete: () => { this.player.clearTint(); }
         });
 
         if (this.health <= 0) {
@@ -417,7 +424,6 @@ export class Game extends Phaser.Scene {
         this.player.body!.enable = false;
         this.playerNameTag.setVisible(false);
         this.playerHearts.clear();
-        this.emitUpdate(); // Final update to tell others I'm dead
         this.checkGameOver();
     }
 
@@ -426,14 +432,9 @@ export class Game extends Phaser.Scene {
         if (!anyAlive) {
             this.gameOver = true;
             this.add.text(400, 300, 'GAME OVER', { 
-                fontSize: '64px', 
-                color: '#ff0000',
-                stroke: '#000000',
-                strokeThickness: 6
+                fontSize: '64px', color: '#ff0000', stroke: '#000000', strokeThickness: 6
             }).setOrigin(0.5);
-            this.time.delayedCall(3000, () => {
-                window.location.reload();
-            });
+            this.time.delayedCall(3000, () => { window.location.reload(); });
         }
     }
 }

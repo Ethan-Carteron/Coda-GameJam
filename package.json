@@ -12,18 +12,21 @@
   "bugs": {
     "url": "https://github.com/phaserjs/template-vite-ts/issues"
   },
-  "homepage": "https://github.com/phaserjs/template-vite-ts#readme",
+  "homepage": "https://ethan-carteron.github.io/Coda-GameJam/",
   "scripts": {
     "dev": "node log.js dev & vite --config vite/config.dev.mjs",
     "dev:multi": "concurrently \"npm run server\" \"npm run dev\"",
     "server": "node server/index.js",
     "build": "node log.js build & vite build --config vite/config.prod.mjs",
     "dev-nolog": "vite --config vite/config.dev.mjs",
-    "build-nolog": "vite build --config vite/config.prod.mjs"
+    "build-nolog": "vite build --config vite/config.prod.mjs",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "concurrently": "^9.2.1",
+    "gh-pages": "^6.3.0",
     "socket.io-client": "^4.8.3",
     "typescript": "~5.7.2",
     "vite": "^6.3.1"

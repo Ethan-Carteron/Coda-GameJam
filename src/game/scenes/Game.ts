@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
 import { Socket } from 'socket.io-client';
-import { processHit, processStarCollection, GameState } from './logic';
+import { processHit, processStarCollection, GameState } from '../logic';
 
 interface PlayerData {
     id: string;

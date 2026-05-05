@@ -167,6 +167,8 @@ export class Game extends Phaser.Scene {
             }
 
             p.health = data.health;
+            this.checkGameOverState();
+
             if (p.health <= 0) {
                 p.sprite.setVisible(false); p.nameTag.setVisible(false); p.hearts.clear();
                 return;
@@ -189,12 +191,16 @@ export class Game extends Phaser.Scene {
         if (this.isHost) return;
         this.gameState.score = data.score;
         this.scoreText.setText('Score: ' + this.gameState.score);
+        
+        // Reset pending collections if host shows a fresh batch of stars
+        const hostActiveCount = data.stars.filter((s: any) => s.active).length;
+        if (hostActiveCount > 10) this.pendingStarCollections.clear();
+
         const currentStars = this.stars.getChildren();
         data.stars.forEach((s: any, index: number) => {
             let star = currentStars[index] as Phaser.Physics.Arcade.Sprite;
             if (!star) star = this.stars.create(s.x, s.y, 'star');
             
-            // Client: don't reactivate star if we just collected it and waiting for host confirmation
             if (this.pendingStarCollections.has(index)) {
                 star.disableBody(true, true);
                 return;
@@ -206,11 +212,12 @@ export class Game extends Phaser.Scene {
                 star.disableBody(true, true);
             }
         });
+
         const currentBombs = this.bombs.getChildren();
         data.bombs.forEach((b: any, index: number) => {
             let bomb = currentBombs[index] as Phaser.Physics.Arcade.Sprite;
             if (!bomb) bomb = this.bombs.create(b.x, b.y, 'bomb');
-            bomb.setScale(0.125);
+            bomb.setScale(0.3)
             bomb.enableBody(true, b.x, b.y, true, true);
             bomb.setBounce(1).setVelocity(b.vx, b.vy);
         });
@@ -218,8 +225,6 @@ export class Game extends Phaser.Scene {
 
     update() {
         if (this.gameState.gameOver) return;
-        
-        // Host: always emit update even if dead
         if (this.isHost) this.emitHostUpdate();
 
         if (!this.gameState.isSpectator) {
@@ -245,32 +250,24 @@ export class Game extends Phaser.Scene {
         const botSprite = this.physics.add.sprite(Phaser.Math.Between(100, 700), 450, 'dude');
         botSprite.setBounce(0.2).setCollideWorldBounds(true);
         this.physics.add.collider(botSprite, this.platforms);
-        
         const botName = this.add.text(0, 0, 'BOT_' + id.substr(4), { fontSize: '12px', color: '#0f0' }).setOrigin(0.5);
         const botHearts = this.add.graphics();
-        
         this.bots.push({ sprite: botSprite, nameTag: botName, hearts: botHearts, health: 3, nextJump: 0 });
     }
 
     updateBots() {
         this.bots.forEach(bot => {
             if (bot.health <= 0) return;
-
             if (this.time.now > bot.nextJump && bot.sprite.body.blocked.down) {
                 bot.sprite.setVelocityY(-330); bot.nextJump = this.time.now + Phaser.Math.Between(1000, 3000);
             }
             bot.sprite.setVelocityX(Math.sin(this.time.now / 500) * 160);
             bot.sprite.anims.play(bot.sprite.body.velocity.x < 0 ? 'left' : 'right', true);
-            
             bot.nameTag.setPosition(bot.sprite.x, bot.sprite.y - 55);
             this.drawHearts(bot.hearts, bot.sprite.x, bot.sprite.y - 40, bot.health);
-
             this.stars.getChildren().forEach((star: any) => {
-                if (star.active && Phaser.Math.Distance.Between(bot.sprite.x, bot.sprite.y, star.x, star.y) < 30) {
-                    this.collectStar(bot.sprite, star);
-                }
+                if (star.active && Phaser.Math.Distance.Between(bot.sprite.x, bot.sprite.y, star.x, star.y) < 30) this.collectStar(bot.sprite, star);
             });
-
             this.physics.overlap(bot.sprite, this.bombs, () => {
                 if (bot.isImmune) return;
                 bot.health--;
@@ -287,24 +284,17 @@ export class Game extends Phaser.Scene {
 
     handleInput() {
         if (this.isDashing) return;
-
-        if (this.gameState.isImmune) {
-            this.player.setAlpha(0.5 + Math.sin(this.time.now / 100) * 0.5);
-        } else {
-            this.player.setAlpha(1);
-        }
+        if (this.gameState.isImmune) this.player.setAlpha(0.5 + Math.sin(this.time.now / 100) * 0.5);
+        else this.player.setAlpha(1);
 
         if (this.cursors.left.isDown) {
-            this.player.setVelocityX(-160);
-            this.player.anims.play('left', true);
+            this.player.setVelocityX(-160); this.player.anims.play('left', true);
             if (Phaser.Input.Keyboard.JustDown(this.cursors.shift) && this.canDash) this.dash(-1000);
         } else if (this.cursors.right.isDown) {
-            this.player.setVelocityX(160);
-            this.player.anims.play('right', true);
+            this.player.setVelocityX(160); this.player.anims.play('right', true);
             if (Phaser.Input.Keyboard.JustDown(this.cursors.shift) && this.canDash) this.dash(1000);
         } else {
-            this.player.setVelocityX(0);
-            this.player.anims.play('turn');
+            this.player.setVelocityX(0); this.player.anims.play('turn');
         }
         if ((this.cursors.up.isDown || this.cursors.space.isDown) && (this.player.body!.blocked.down || this.player.body!.touching.down)) this.player.setVelocityY(-330);
     }
@@ -339,11 +329,10 @@ export class Game extends Phaser.Scene {
     }
 
     emitHostUpdate() {
+        const starsData = this.stars.getChildren().map((s: any) => ({ x: s.x, y: s.y, bounceY: s.bounceY, active: s.active }));
+        const bombsData = this.bombs.getChildren().filter((b: any) => b.active).map((b: any) => ({ x: b.x, y: b.y, vx: b.body.velocity.x, vy: b.body.velocity.y }));
         this.socket.emit('hostUpdate', {
-            roomCode: this.roomCode,
-            stars: this.stars.getChildren().map((s: any) => ({ x: s.x, y: s.y, bounceY: s.bounceY, active: s.active })),
-            bombs: this.bombs.getChildren().filter((b: any) => b.active).map((b: any) => ({ x: b.x, y: b.y, vx: b.body.velocity.x, vy: b.body.velocity.y })),
-            score: this.gameState.score
+            roomCode: this.roomCode, stars: starsData, bombs: bombsData, score: this.gameState.score
         });
     }
 
@@ -355,18 +344,14 @@ export class Game extends Phaser.Scene {
         }
     }
 
-    applyColorFilter(sprite: Phaser.GameObjects.Sprite | any, color: number) {
+    applyColorFilter(sprite: any, color: number) {
         if (!sprite || !sprite.setTint) return;
         sprite.setTint(color);
-        this.time.delayedCall(500, () => {
-            if (sprite && sprite.active && sprite.clearTint) sprite.clearTint();
-        });
+        this.time.delayedCall(500, () => { if (sprite && sprite.active && sprite.clearTint) sprite.clearTint(); });
     }
 
     showDeathMessage(name: string, x: number, y: number) {
-        const txt = this.add.text(x, y, `${name} est mort !`, { 
-            fontSize: '24px', color: '#ff0000', fontStyle: 'bold', stroke: '#000', strokeThickness: 4 
-        }).setOrigin(0.5);
+        const txt = this.add.text(x, y, `${name} est mort !`, { fontSize: '24px', color: '#f00', fontStyle: 'bold', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5);
         this.tweens.add({ targets: txt, y: y - 50, alpha: 0, duration: 3000, onComplete: () => txt.destroy() });
     }
 
@@ -374,16 +359,13 @@ export class Game extends Phaser.Scene {
         if (!star.active) return;
         const index = this.stars.getChildren().indexOf(star);
         if (index === -1) return;
-
         this.applyColorFilter(collector, 0xffff00);
-
         if (!this.isHost) {
             this.socket.emit('starCollected', { roomCode: this.roomCode, starIndex: index });
             this.pendingStarCollections.add(index);
             star.setActive(false).setVisible(false);
             return;
         }
-
         this.gameState = processStarCollection(this.gameState);
         this.pendingStarCollections.delete(index);
         star.disableBody(true, true);
@@ -392,28 +374,17 @@ export class Game extends Phaser.Scene {
             this.spawnStars();
             const x = (this.player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
             const bomb = this.bombs.create(x, 16, 'bomb');
-            bomb.setScale(0.3);
             bomb.setBounce(1).setCollideWorldBounds(true).setVelocity(Phaser.Math.Between(-200, 200), 20);
         }
     }
 
     hitBomb() {
         if (this.gameState.isImmune || this.gameState.isSpectator) return;
-        
         this.gameState = processHit(this.gameState);
         this.applyColorFilter(this.player, 0xff0000);
         this.player.setVelocity(0, -200);
-
-        if (this.gameState.isSpectator) {
-            this.showDeathMessage(this.playerName, this.player.x, this.player.y);
-            this.becomeSpectator();
-        } else {
-            this.time.delayedCall(1000, () => {
-                this.gameState.isImmune = false;
-            });
-        }
-        
-        // Immediate emit to inform others of health change
+        if (this.gameState.isSpectator) { this.showDeathMessage(this.playerName, this.player.x, this.player.y); this.becomeSpectator(); }
+        else this.time.delayedCall(1000, () => { this.gameState.isImmune = false; });
         this.emitUpdate();
     }
 
@@ -427,7 +398,6 @@ export class Game extends Phaser.Scene {
     checkGameOverState() {
         const allHealths = Array.from(this.players.values()).map(p => p.health);
         allHealths.push(this.gameState.health);
-        
         if (allHealths.every(h => h <= 0)) {
             this.gameState.gameOver = true;
             this.add.text(400, 300, 'GAME OVER', { fontSize: '64px', color: '#f00', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5);

@@ -62,6 +62,13 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('spawnBot', (roomCode) => {
+        const room = rooms.get(roomCode.toUpperCase());
+        if (room && room.hostId === socket.id) {
+            io.to(roomCode).emit('botSpawned', { id: 'bot_' + Math.random().toString(36).substr(2, 5) });
+        }
+    });
+
     socket.on('playerUpdate', (data) => {
         socket.to(data.roomCode.toUpperCase()).emit('playerMoved', {
             id: socket.id, x: data.x, y: data.y, flipX: data.flipX,

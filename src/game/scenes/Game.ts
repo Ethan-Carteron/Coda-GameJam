@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
 import { Socket } from 'socket.io-client';
-import { processHit, processStarCollection, GameState } from '../logic';
+import { processHit, processStarCollection, GameState, INITIAL_HEALTH } from '../logic';
 
 interface PlayerData {
     id: string;
@@ -27,10 +27,9 @@ export class Game extends Phaser.Scene {
     private bombs: Phaser.Physics.Arcade.Group;
     private platforms: Phaser.Physics.Arcade.StaticGroup;
     private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
-    private botKey: Phaser.Input.Keyboard.Key;
     
     private gameState: GameState = {
-        health: 3, isImmune: false, score: 0, isSpectator: false, gameOver: false
+        health: INITIAL_HEALTH, isImmune: false, score: 0, isSpectator: false, gameOver: false, activeTint: null
     };
 
     private scoreText: Phaser.GameObjects.Text;
@@ -47,7 +46,7 @@ export class Game extends Phaser.Scene {
     init(data: { socket: Socket, roomCode: string }) {
         this.socket = data.socket;
         this.roomCode = data.roomCode;
-        this.gameState = { health: 3, isImmune: false, score: 0, isSpectator: false, gameOver: false };
+        this.gameState = { health: INITIAL_HEALTH, isImmune: false, score: 0, isSpectator: false, gameOver: false, activeTint: null };
     }
 
     preload() {
@@ -72,7 +71,6 @@ export class Game extends Phaser.Scene {
         this.setupSocketListeners();
 
         this.cursors = this.input.keyboard!.createCursorKeys();
-        this.botKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.B);
 
         if (!this.anims.exists('left')) {
             this.anims.create({ key: 'left', frames: this.anims.generateFrameNumbers('dude', { start: 0, end: 3 }), frameRate: 10, repeat: -1 });
@@ -114,6 +112,7 @@ export class Game extends Phaser.Scene {
         this.socket.off('playerMoved');
         this.socket.off('gameStateSync');
         this.socket.off('collectStarAt');
+        this.socket.off('botSpawned');
         this.socket.off('hostLeft');
 
         this.socket.emit('getRoomInfo', this.roomCode);
@@ -130,6 +129,7 @@ export class Game extends Phaser.Scene {
         this.socket.on('playerLeft', (id) => this.removeRemotePlayer(id));
         this.socket.on('playerMoved', (data) => this.updateRemotePlayer(data));
         this.socket.on('gameStateSync', (data) => this.syncGameState(data));
+        this.socket.on('botSpawned', (data) => this.spawnBot(data.id));
         
         this.socket.on('collectStarAt', (starIndex: number) => {
             if (this.isHost) {
@@ -148,7 +148,7 @@ export class Game extends Phaser.Scene {
         (sprite.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
         const nameTag = this.add.text(0, 0, p.name, { fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
         const hearts = this.add.graphics();
-        this.players.set(p.id, { sprite, nameTag, hearts, health: 3, isImmune: false });
+        this.players.set(p.id, { sprite, nameTag, hearts, health: INITIAL_HEALTH, isImmune: false });
     }
 
     removeRemotePlayer(id: string) {
@@ -159,9 +159,9 @@ export class Game extends Phaser.Scene {
     updateRemotePlayer(data: any) {
         const p = this.players.get(data.id);
         if (p) {
-            // Death Message for others
+            // Détection de mort pour affichage message
             if (data.health <= 0 && p.health > 0) {
-                this.add.text(data.x, data.y, `${p.nameTag.text} est mort !`, { fontSize: '20px', color: '#f00', fontStyle: 'bold' }).setOrigin(0.5);
+                this.showDeathMessage(p.nameTag.text, data.x, data.y);
             }
 
             p.health = data.health;
@@ -170,7 +170,7 @@ export class Game extends Phaser.Scene {
                 return;
             }
 
-            // Sync Damage Filter for others
+            // Filtre rouge distant
             if (data.isImmune && !p.isImmune) {
                 this.applyColorFilter(p.sprite, 0xff0000);
             }
@@ -217,9 +217,8 @@ export class Game extends Phaser.Scene {
             this.checkStarsDistance();
         }
 
-        if (Phaser.Input.Keyboard.JustDown(this.botKey)) this.spawnBot();
         this.updateBots();
-        this.emitUpdate(); // Always emit, even as spectator, to sync death/last position
+        this.emitUpdate();
     }
 
     checkStarsDistance() {
@@ -231,34 +230,69 @@ export class Game extends Phaser.Scene {
         });
     }
 
-    spawnBot() {
-        const bot = this.physics.add.sprite(Phaser.Math.Between(100, 700), 450, 'dude');
-        bot.setBounce(0.2).setCollideWorldBounds(true);
-        this.physics.add.collider(bot, this.platforms);
-        this.bots.push({ sprite: bot, nextJump: 0 });
+    spawnBot(id: string) {
+        const botSprite = this.physics.add.sprite(Phaser.Math.Between(100, 700), 450, 'dude');
+        botSprite.setBounce(0.2).setCollideWorldBounds(true);
+        this.physics.add.collider(botSprite, this.platforms);
+        
+        const botName = this.add.text(0, 0, 'BOT_' + id.substr(4), { fontSize: '12px', color: '#0f0' }).setOrigin(0.5);
+        const botHearts = this.add.graphics();
+        
+        this.bots.push({ sprite: botSprite, nameTag: botName, hearts: botHearts, health: 3, nextJump: 0 });
     }
 
     updateBots() {
         this.bots.forEach(bot => {
+            if (bot.health <= 0) return;
+
             if (this.time.now > bot.nextJump && bot.sprite.body.blocked.down) {
                 bot.sprite.setVelocityY(-330); bot.nextJump = this.time.now + Phaser.Math.Between(1000, 3000);
             }
             bot.sprite.setVelocityX(Math.sin(this.time.now / 500) * 160);
             bot.sprite.anims.play(bot.sprite.body.velocity.x < 0 ? 'left' : 'right', true);
+            
+            // Bot UI
+            bot.nameTag.setPosition(bot.sprite.x, bot.sprite.y - 55);
+            this.drawHearts(bot.hearts, bot.sprite.x, bot.sprite.y - 40, bot.health);
+
+            // Bot Star Check
             this.stars.getChildren().forEach((star: any) => {
-                if (star.active && Phaser.Math.Distance.Between(bot.sprite.x, bot.sprite.y, star.x, star.y) < 30) this.collectStar(bot.sprite, star);
+                if (star.active && Phaser.Math.Distance.Between(bot.sprite.x, bot.sprite.y, star.x, star.y) < 30) {
+                    this.collectStar(bot.sprite, star);
+                }
+            });
+
+            // Bot Bomb Check
+            this.physics.overlap(bot.sprite, this.bombs, () => {
+                if (bot.isImmune) return;
+                bot.health--;
+                this.applyColorFilter(bot.sprite, 0xff0000);
+                bot.isImmune = true;
+                this.time.delayedCall(1000, () => bot.isImmune = false);
+                if (bot.health <= 0) {
+                    bot.sprite.setVisible(false); bot.nameTag.setVisible(false); bot.hearts.clear();
+                    this.showDeathMessage(bot.nameTag.text, bot.sprite.x, bot.sprite.y);
+                }
             });
         });
     }
 
     handleInput() {
-        if (this.gameState.isImmune) { this.player.setVelocityX(0); this.player.setAlpha(0.5 + Math.sin(this.time.now / 100) * 0.5); return; }
-        if (this.cursors.left.isDown) {
-            this.player.setVelocityX(-160); this.player.anims.play('left', true);
-        } else if (this.cursors.right.isDown) {
-            this.player.setVelocityX(160); this.player.anims.play('right', true);
+        if (this.gameState.isImmune) {
+            this.player.setAlpha(0.5 + Math.sin(this.time.now / 100) * 0.5);
         } else {
-            this.player.setVelocityX(0); this.player.anims.play('turn');
+            this.player.setAlpha(1);
+        }
+
+        if (this.cursors.left.isDown) {
+            this.player.setVelocityX(-160);
+            this.player.anims.play('left', true);
+        } else if (this.cursors.right.isDown) {
+            this.player.setVelocityX(160);
+            this.player.anims.play('right', true);
+        } else {
+            this.player.setVelocityX(0);
+            this.player.anims.play('turn');
         }
         if ((this.cursors.up.isDown || this.cursors.space.isDown) && (this.player.body!.blocked.down || this.player.body!.touching.down)) this.player.setVelocityY(-330);
     }
@@ -304,24 +338,26 @@ export class Game extends Phaser.Scene {
 
     applyColorFilter(sprite: Phaser.GameObjects.Sprite, color: number) {
         sprite.setTint(color);
-        this.tweens.addCounter({
-            from: 255, to: 0, duration: 800,
-            onUpdate: (t) => {
-                const v = Math.floor(t.getValue());
-                sprite.setTint(Phaser.Display.Color.GetColor(255, 255 - v, 255 - v));
-            },
-            onComplete: () => sprite.clearTint()
+        // On utilise un timer simple au lieu d'un tween complexe pour plus de fiabilité
+        this.time.delayedCall(500, () => {
+            if (sprite && sprite.active) sprite.clearTint();
         });
     }
 
-    collectStar(_player: any, star: any) {
-        if (!star.active) return;
-        
-        // Debug Feedback: Flash Yellow on contact
-        this.applyColorFilter(_player === this.player ? this.player : _player, 0xffff00);
+    showDeathMessage(name: string, x: number, y: number) {
+        const txt = this.add.text(x, y, `${name} est mort !`, { 
+            fontSize: '24px', color: '#ff0000', fontStyle: 'bold', stroke: '#000', strokeThickness: 4 
+        }).setOrigin(0.5);
+        this.tweens.add({ targets: txt, y: y - 50, alpha: 0, duration: 3000, onComplete: () => txt.destroy() });
+    }
 
+    collectStar(collector: any, star: any) {
+        if (!star.active) return;
         const index = this.stars.getChildren().indexOf(star);
         if (index === -1) return;
+
+        // FEEDBACK IMMEDIAT : Filtre Jaune
+        this.applyColorFilter(collector, 0xffff00);
 
         if (!this.isHost) {
             this.socket.emit('starCollected', { roomCode: this.roomCode, starIndex: index });
@@ -342,18 +378,22 @@ export class Game extends Phaser.Scene {
 
     hitBomb() {
         if (this.gameState.isImmune || this.gameState.isSpectator) return;
+        
         this.gameState = processHit(this.gameState);
-        this.applyColorFilter(this.player, 0xff0000); // Local Damage Filter
-        this.player.setVelocity(0, 0);
+        this.applyColorFilter(this.player, 0xff0000);
+        this.player.setVelocity(0, -200); // Petit recul lors de l'impact
 
-        if (this.gameState.isSpectator) this.becomeSpectator();
-        else this.time.delayedCall(3000, () => { this.gameState.isImmune = false; this.player.setAlpha(1); });
+        if (this.gameState.isSpectator) {
+            this.showDeathMessage(this.playerName, this.player.x, this.player.y);
+            this.becomeSpectator();
+        } else {
+            this.time.delayedCall(1000, () => { // Immunité réduite à 1s pour éviter le bug du 3e coup
+                this.gameState.isImmune = false;
+            });
+        }
     }
 
     becomeSpectator() {
-        // Death message for local verify
-        this.add.text(this.player.x, this.player.y, `${this.playerName} est mort !`, { fontSize: '20px', color: '#f00', fontStyle: 'bold' }).setOrigin(0.5);
-        
         this.player.setVisible(false).setActive(false);
         if (this.player.body) this.player.body.enable = false;
         this.playerNameTag.setVisible(false); this.playerHearts.clear();
@@ -361,10 +401,12 @@ export class Game extends Phaser.Scene {
     }
 
     checkGameOverState() {
-        const anyAlive = Array.from(this.players.values()).some(p => p.health > 0) || this.gameState.health > 0;
-        if (!anyAlive) {
+        const allHealths = Array.from(this.players.values()).map(p => p.health);
+        allHealths.push(this.gameState.health);
+        
+        if (allHealths.every(h => h <= 0)) {
             this.gameState.gameOver = true;
-            this.add.text(400, 300, 'GAME OVER', { fontSize: '64px', color: '#f00' }).setOrigin(0.5);
+            this.add.text(400, 300, 'GAME OVER', { fontSize: '64px', color: '#f00', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5);
             this.time.delayedCall(3000, () => window.location.reload());
         }
     }

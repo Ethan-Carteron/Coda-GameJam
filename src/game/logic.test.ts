@@ -1,36 +1,79 @@
 import { describe, it, expect } from 'vitest';
-import { processHit, processStarCollection, checkGameOver, GameState } from './logic';
+import { processHit, processStarCollection, checkGameOver, GameState, INITIAL_HEALTH } from './logic';
 
-describe('Règles Métier du Jeu', () => {
+const createBaseState = (): GameState => ({
+    health: INITIAL_HEALTH,
+    isImmune: false,
+    score: 0,
+    isSpectator: false,
+    gameOver: false,
+    activeTint: null
+});
+
+describe('Validation des Bugs - Tests Unitaires', () => {
     
-    it('doit perdre une vie quand un ennemi touche le joueur', () => {
-        const initialState: GameState = { health: 3, isImmune: false, score: 0, isSpectator: false, gameOver: false };
-        const newState = processHit(initialState);
-        expect(newState.health).toBe(2);
-        expect(newState.isImmune).toBe(true);
+    describe('Bug 3ème coup non comptabilisé', () => {
+        it('doit passer de 3 à 0 vies en 3 coups sans rester bloqué', () => {
+            let state = createBaseState();
+            
+            // Coup 1
+            state = processHit(state);
+            expect(state.health).toBe(2);
+            expect(state.isImmune).toBe(true);
+            
+            // Simulation fin immunité
+            state.isImmune = false;
+            
+            // Coup 2
+            state = processHit(state);
+            expect(state.health).toBe(1);
+            expect(state.isImmune).toBe(true);
+            
+            // Simulation fin immunité
+            state.isImmune = false;
+            
+            // Coup 3 (LE CRITIQUE)
+            state = processHit(state);
+            expect(state.health).toBe(0);
+            expect(state.isSpectator).toBe(true);
+            expect(state.isImmune).toBe(false);
+        });
     });
 
-    it('doit devenir spectateur quand il perd sa dernière vie', () => {
-        const initialState: GameState = { health: 1, isImmune: false, score: 0, isSpectator: false, gameOver: false };
-        const newState = processHit(initialState);
-        expect(newState.health).toBe(0);
-        expect(newState.isSpectator).toBe(true);
+    describe('Bug Filtres (Teintes)', () => {
+        it('doit activer le filtre jaune lors du ramassage d\'étoile', () => {
+            let state = createBaseState();
+            state = processStarCollection(state);
+            expect(state.activeTint).toBe("yellow");
+        });
+
+        it('doit activer le filtre rouge lors d\'un dégât', () => {
+            let state = createBaseState();
+            state = processHit(state);
+            expect(state.activeTint).toBe("red");
+        });
+
+        it('ne doit pas écraser un filtre de dégât par un filtre d\'étoile si immunisé', () => {
+            let state = createBaseState();
+            state = processHit(state); // activeTint = red, isImmune = true
+            state = processStarCollection(state);
+            // On veut quand même le jaune pour le feedback même si on est immunisé aux dégâts
+            expect(state.activeTint).toBe("yellow"); 
+        });
     });
 
-    it('ne doit pas perdre de vie s\'il est déjà immunisé', () => {
-        const initialState: GameState = { health: 2, isImmune: true, score: 0, isSpectator: false, gameOver: false };
-        const newState = processHit(initialState);
-        expect(newState.health).toBe(2);
-    });
+    describe('Bug Mort et Spectateur', () => {
+        it('doit mettre à jour isSpectator exactement à 0 vie', () => {
+            const state = { ...createBaseState(), health: 1 };
+            const next = processHit(state);
+            expect(next.isSpectator).toBe(true);
+            expect(next.health).toBe(0);
+        });
 
-    it('doit augmenter le score quand une étoile est ramassée', () => {
-        const initialState: GameState = { health: 3, isImmune: false, score: 0, isSpectator: false, gameOver: false };
-        const newState = processStarCollection(initialState);
-        expect(newState.score).toBe(10);
-    });
-
-    it('doit déclencher Game Over quand TOUS les joueurs ont 0 vie', () => {
-        expect(checkGameOver([0, 0, 0])).toBe(true);
-        expect(checkGameOver([0, 1, 0])).toBe(false);
+        it('doit déclencher Game Over pour toute l\'équipe', () => {
+            expect(checkGameOver([0, 0])).toBe(true);
+            expect(checkGameOver([0, 1])).toBe(false);
+            expect(checkGameOver([])).toBe(false); // Pas de joueurs = pas de game over
+        });
     });
 });

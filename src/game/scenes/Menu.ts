@@ -127,6 +127,7 @@ export class Menu extends Phaser.Scene {
                     <label style="font-size: 14px; color: #aaa;">Limite de joueurs :</label>
                     <input type="number" id="maxPlayers" value="${room.maxPlayers}" min="2" max="100" style="padding:10px; border-radius:5px; border:none; text-align:center; font-weight:bold;">
                 </div>
+                <button id="btnAddBot" style="padding:10px; background:#2196F3; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; margin-top:10px;">AJOUTER UN BOT</button>
                 <button id="btnStart" style="padding:15px; background:#4CAF50; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; font-size:18px; margin-top:10px;">LANCER LA PARTIE</button>
             ` : `
                 <div style="text-align:center; padding:20px; color:#aaa; font-style:italic;">En attente de l'hôte...</div>
@@ -136,8 +137,13 @@ export class Menu extends Phaser.Scene {
         `;
 
         const btnStart = document.getElementById('btnStart');
+        const btnAddBot = document.getElementById('btnAddBot');
         const btnLeave = document.getElementById('btnLeave');
         const maxPlayersInput = document.getElementById('maxPlayers') as HTMLInputElement;
+
+        btnAddBot?.addEventListener('click', () => {
+            this.socket.emit('spawnBot', room.code);
+        });
 
         this.socket.off('playerJoined');
         this.socket.on('playerJoined', (player) => {

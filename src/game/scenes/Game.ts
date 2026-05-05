@@ -38,6 +38,8 @@ export class Game extends Phaser.Scene {
     private playerHearts: Phaser.GameObjects.Graphics;
     private playerNameTag: Phaser.GameObjects.Text;
     private bots: any[] = [];
+    
+    private pendingStarCollections: Set<number> = new Set();
 
     constructor() {
         super('Game');
@@ -47,6 +49,7 @@ export class Game extends Phaser.Scene {
         this.socket = data.socket;
         this.roomCode = data.roomCode;
         this.gameState = { health: INITIAL_HEALTH, isImmune: false, score: 0, isSpectator: false, gameOver: false, activeTint: null };
+        this.pendingStarCollections.clear();
     }
 
     preload() {
@@ -159,7 +162,6 @@ export class Game extends Phaser.Scene {
     updateRemotePlayer(data: any) {
         const p = this.players.get(data.id);
         if (p) {
-            // Détection de mort pour affichage message
             if (data.health <= 0 && p.health > 0) {
                 this.showDeathMessage(p.nameTag.text, data.x, data.y);
             }
@@ -170,7 +172,6 @@ export class Game extends Phaser.Scene {
                 return;
             }
 
-            // Filtre rouge distant
             if (data.isImmune && !p.isImmune) {
                 this.applyColorFilter(p.sprite, 0xff0000);
             }
@@ -192,6 +193,13 @@ export class Game extends Phaser.Scene {
         data.stars.forEach((s: any, index: number) => {
             let star = currentStars[index] as Phaser.Physics.Arcade.Sprite;
             if (!star) star = this.stars.create(s.x, s.y, 'star');
+            
+            // Client: don't reactivate star if we just collected it and waiting for host confirmation
+            if (this.pendingStarCollections.has(index)) {
+                star.disableBody(true, true);
+                return;
+            }
+
             if (s.active) {
                 star.enableBody(true, s.x, s.y, true, true);
             } else {
@@ -209,6 +217,8 @@ export class Game extends Phaser.Scene {
 
     update() {
         if (this.gameState.gameOver) return;
+        
+        // Host: always emit update even if dead
         if (this.isHost) this.emitHostUpdate();
 
         if (!this.gameState.isSpectator) {
@@ -251,18 +261,15 @@ export class Game extends Phaser.Scene {
             bot.sprite.setVelocityX(Math.sin(this.time.now / 500) * 160);
             bot.sprite.anims.play(bot.sprite.body.velocity.x < 0 ? 'left' : 'right', true);
             
-            // Bot UI
             bot.nameTag.setPosition(bot.sprite.x, bot.sprite.y - 55);
             this.drawHearts(bot.hearts, bot.sprite.x, bot.sprite.y - 40, bot.health);
 
-            // Bot Star Check
             this.stars.getChildren().forEach((star: any) => {
                 if (star.active && Phaser.Math.Distance.Between(bot.sprite.x, bot.sprite.y, star.x, star.y) < 30) {
                     this.collectStar(bot.sprite, star);
                 }
             });
 
-            // Bot Bomb Check
             this.physics.overlap(bot.sprite, this.bombs, () => {
                 if (bot.isImmune) return;
                 bot.health--;
@@ -278,6 +285,8 @@ export class Game extends Phaser.Scene {
     }
 
     handleInput() {
+        if (this.isDashing) return;
+
         if (this.gameState.isImmune) {
             this.player.setAlpha(0.5 + Math.sin(this.time.now / 100) * 0.5);
         } else {
@@ -287,14 +296,23 @@ export class Game extends Phaser.Scene {
         if (this.cursors.left.isDown) {
             this.player.setVelocityX(-160);
             this.player.anims.play('left', true);
+            if (Phaser.Input.Keyboard.JustDown(this.cursors.shift) && this.canDash) this.dash(-1000);
         } else if (this.cursors.right.isDown) {
             this.player.setVelocityX(160);
             this.player.anims.play('right', true);
+            if (Phaser.Input.Keyboard.JustDown(this.cursors.shift) && this.canDash) this.dash(1000);
         } else {
             this.player.setVelocityX(0);
             this.player.anims.play('turn');
         }
         if ((this.cursors.up.isDown || this.cursors.space.isDown) && (this.player.body!.blocked.down || this.player.body!.touching.down)) this.player.setVelocityY(-330);
+    }
+
+    dash(velocity: number) {
+        this.isDashing = true; this.canDash = false;
+        this.player.setVelocityX(velocity);
+        this.time.delayedCall(200, () => { this.isDashing = false; });
+        this.time.delayedCall(1000, () => { this.canDash = true; });
     }
 
     updateUI() {
@@ -336,11 +354,11 @@ export class Game extends Phaser.Scene {
         }
     }
 
-    applyColorFilter(sprite: Phaser.GameObjects.Sprite, color: number) {
+    applyColorFilter(sprite: Phaser.GameObjects.Sprite | any, color: number) {
+        if (!sprite || !sprite.setTint) return;
         sprite.setTint(color);
-        // On utilise un timer simple au lieu d'un tween complexe pour plus de fiabilité
         this.time.delayedCall(500, () => {
-            if (sprite && sprite.active) sprite.clearTint();
+            if (sprite && sprite.active && sprite.clearTint) sprite.clearTint();
         });
     }
 
@@ -356,16 +374,17 @@ export class Game extends Phaser.Scene {
         const index = this.stars.getChildren().indexOf(star);
         if (index === -1) return;
 
-        // FEEDBACK IMMEDIAT : Filtre Jaune
         this.applyColorFilter(collector, 0xffff00);
 
         if (!this.isHost) {
             this.socket.emit('starCollected', { roomCode: this.roomCode, starIndex: index });
+            this.pendingStarCollections.add(index);
             star.setActive(false).setVisible(false);
             return;
         }
 
         this.gameState = processStarCollection(this.gameState);
+        this.pendingStarCollections.delete(index);
         star.disableBody(true, true);
         this.scoreText.setText('Score: ' + this.gameState.score);
         if (this.stars.countActive(true) === 0) {
@@ -381,16 +400,19 @@ export class Game extends Phaser.Scene {
         
         this.gameState = processHit(this.gameState);
         this.applyColorFilter(this.player, 0xff0000);
-        this.player.setVelocity(0, -200); // Petit recul lors de l'impact
+        this.player.setVelocity(0, -200);
 
         if (this.gameState.isSpectator) {
             this.showDeathMessage(this.playerName, this.player.x, this.player.y);
             this.becomeSpectator();
         } else {
-            this.time.delayedCall(1000, () => { // Immunité réduite à 1s pour éviter le bug du 3e coup
+            this.time.delayedCall(1000, () => {
                 this.gameState.isImmune = false;
             });
         }
+        
+        // Immediate emit to inform others of health change
+        this.emitUpdate();
     }
 
     becomeSpectator() {

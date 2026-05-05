@@ -98,7 +98,7 @@ export class Game extends Phaser.Scene {
         this.player = this.physics.add.sprite(100, 450, 'dude');
         this.player.setBounce(0.2);
         this.player.setCollideWorldBounds(true);
-        this.player.setSize(20, 32).setOffset(6, 16);
+        this.player.setBodySize(this.player.width, this.player.height);
         this.playerNameTag = this.add.text(0, 0, '', { fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
         this.playerHearts = this.add.graphics();
     }
@@ -156,6 +156,7 @@ export class Game extends Phaser.Scene {
         const sprite = this.physics.add.sprite(100, 450, 'dude');
         sprite.setImmovable(true);
         (sprite.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
+        sprite.setBodySize(sprite.width, sprite.height);
         const nameTag = this.add.text(0, 0, p.name, { fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
         const hearts = this.add.graphics();
         this.players.set(p.id, { sprite, nameTag, hearts, health: INITIAL_HEALTH, isImmune: false });
@@ -258,6 +259,7 @@ export class Game extends Phaser.Scene {
     spawnBot(id: string) {
         const botSprite = this.physics.add.sprite(Phaser.Math.Between(100, 700), 450, 'dude');
         botSprite.setBounce(0.2).setCollideWorldBounds(true);
+        botSprite.setBodySize(botSprite.width, botSprite.height);
         this.physics.add.collider(botSprite, this.platforms);
         const botName = this.add.text(0, 0, 'BOT_' + id.substr(4), { fontSize: '12px', color: '#0f0' }).setOrigin(0.5);
         const botHearts = this.add.graphics();
@@ -399,25 +401,22 @@ export class Game extends Phaser.Scene {
 
     setupBomb(bomb: Phaser.Physics.Arcade.Sprite) {
         const texture = bomb.texture.key;
-        
-        // On ajuste le scale pour que tout le monde ait la même taille que bomb1 à 0.3 (~105px de large)
+
         if (texture === 'bomb1') {
             bomb.setScale(0.3);
-            bomb.setCircle(60, 110, 40);
         } else if (texture === 'bomb2') {
             bomb.setScale(0.21);
-            bomb.setCircle(200, 50, 40);
         } else if (texture === 'bomb3') {
-            bomb.setScale(0.07); // 1463 * 0.07 ≈ 102px
-            bomb.setCircle(600, 130, 50);
+            bomb.setScale(0.07);
         } else if (texture === 'bomb4') {
-            bomb.setScale(0.1); // 1024 * 0.1 ≈ 102px
-            bomb.setCircle(350, 400, 50);
+            bomb.setScale(0.1);
         } else {
             bomb.setScale(0.3);
-            bomb.setCircle(bomb.width / 4, bomb.width / 4, bomb.height / 4);
         }
-        
+
+        // Hitbox match image size exactly
+        bomb.setBodySize(bomb.width, bomb.height);
+        bomb.setOffset(0, 0);
         (bomb.body as Phaser.Physics.Arcade.Body).updateFromGameObject();
         bomb.setBounce(1);
         bomb.setCollideWorldBounds(true);

@@ -210,6 +210,7 @@ export class Game extends Phaser.Scene {
         data.bombs.forEach((b: any, index: number) => {
             let bomb = currentBombs[index] as Phaser.Physics.Arcade.Sprite;
             if (!bomb) bomb = this.bombs.create(b.x, b.y, 'bomb');
+            bomb.setScale(0.125);
             bomb.enableBody(true, b.x, b.y, true, true);
             bomb.setBounce(1).setVelocity(b.vx, b.vy);
         });

@@ -59,8 +59,6 @@ export class Game extends Phaser.Scene {
 
     create() {
         this.add.image(400, 300, 'sky');
-        
-        // Setup Groups first so they exist when hostUpdate arrives
         this.platforms = this.physics.add.staticGroup();
         this.stars = this.physics.add.group();
         this.bombs = this.physics.add.group();
@@ -73,10 +71,11 @@ export class Game extends Phaser.Scene {
 
         this.cursors = this.input.keyboard!.createCursorKeys();
 
-        // Animations
-        this.anims.create({ key: 'left', frames: this.anims.generateFrameNumbers('dude', { start: 0, end: 3 }), frameRate: 10, repeat: -1 });
-        this.anims.create({ key: 'turn', frames: [ { key: 'dude', frame: 4 } ], frameRate: 20 });
-        this.anims.create({ key: 'right', frames: this.anims.generateFrameNumbers('dude', { start: 5, end: 8 }), frameRate: 10, repeat: -1 });
+        if (!this.anims.exists('left')) {
+            this.anims.create({ key: 'left', frames: this.anims.generateFrameNumbers('dude', { start: 0, end: 3 }), frameRate: 10, repeat: -1 });
+            this.anims.create({ key: 'turn', frames: [ { key: 'dude', frame: 4 } ], frameRate: 20 });
+            this.anims.create({ key: 'right', frames: this.anims.generateFrameNumbers('dude', { start: 5, end: 8 }), frameRate: 10, repeat: -1 });
+        }
     }
 
     setupPlatforms() {
@@ -141,6 +140,16 @@ export class Game extends Phaser.Scene {
         this.socket.on('playerLeft', (id) => this.removeRemotePlayer(id));
         this.socket.on('playerMoved', (data) => this.updateRemotePlayer(data));
         this.socket.on('gameStateSync', (data) => this.syncGameState(data));
+        
+        this.socket.on('collectStarAt', (index) => {
+            if (this.isHost) {
+                const star = this.stars.getChildren()[index] as Phaser.Physics.Arcade.Sprite;
+                if (star && star.active) {
+                    this.collectStar(null, star);
+                }
+            }
+        });
+
         this.socket.on('hostLeft', () => {
             alert("L'hôte a quitté la partie.");
             window.location.reload();
@@ -178,37 +187,37 @@ export class Game extends Phaser.Scene {
     updateRemotePlayer(data: any) {
         const p = this.players.get(data.id);
         if (p) {
+            p.health = data.health;
+            if (p.health <= 0) {
+                p.sprite.setVisible(false);
+                p.nameTag.setVisible(false);
+                p.hearts.clear();
+                return;
+            }
+
+            p.sprite.setVisible(true);
+            p.nameTag.setVisible(true);
             p.sprite.setPosition(data.x, data.y);
             p.sprite.setFlipX(data.flipX);
             if (data.anim) p.sprite.anims.play(data.anim, true);
             
-            p.health = data.health;
-            if (data.health <= 0) {
-                p.sprite.setVisible(false);
-                p.nameTag.setVisible(false);
-                p.hearts.clear();
+            this.drawHearts(p.hearts, data.x, data.y - 40, data.health);
+            p.nameTag.setPosition(data.x, data.y - 55);
+            
+            if (data.isImmune) {
+                p.sprite.setAlpha(0.5 + Math.sin(this.time.now / 100) * 0.5);
             } else {
-                p.sprite.setVisible(true);
-                p.nameTag.setVisible(true);
-                this.drawHearts(p.hearts, data.x, data.y - 40, data.health);
-                p.nameTag.setPosition(data.x, data.y - 55);
-                
-                if (data.isImmune) {
-                    p.sprite.setAlpha(0.5 + Math.sin(this.time.now / 100) * 0.5);
-                } else {
-                    p.sprite.setAlpha(1);
-                }
+                p.sprite.setAlpha(1);
             }
         }
     }
 
     syncGameState(data: any) {
-        if (this.isHost) return; // Host doesn't sync from others
+        if (this.isHost) return;
 
         this.score = data.score;
         this.scoreText.setText('Score: ' + this.score);
 
-        // Sync Stars
         const currentStars = this.stars.getChildren();
         data.stars.forEach((s: any, index: number) => {
             let star = currentStars[index] as Phaser.Physics.Arcade.Sprite;
@@ -220,14 +229,10 @@ export class Game extends Phaser.Scene {
             star.setBounceY(s.bounceY);
         });
         
-        // Remove extra stars if any
-        if (currentStars.length > data.stars.length) {
-            for (let i = data.stars.length; i < currentStars.length; i++) {
-                (currentStars[i] as Phaser.Physics.Arcade.Sprite).disableBody(true, true);
-            }
+        for (let i = data.stars.length; i < currentStars.length; i++) {
+            (currentStars[i] as Phaser.Physics.Arcade.Sprite).disableBody(true, true);
         }
 
-        // Sync Bombs
         const currentBombs = this.bombs.getChildren();
         data.bombs.forEach((b: any, index: number) => {
             let bomb = currentBombs[index] as Phaser.Physics.Arcade.Sprite;
@@ -248,7 +253,6 @@ export class Game extends Phaser.Scene {
         if (this.isImmune || this.isDashing) {
             if (this.isImmune) {
                 this.player.setAlpha(0.5 + Math.sin(this.time.now / 100) * 0.5);
-                // Stunned: can't move X but gravity still applies
                 this.player.setVelocityX(0);
             }
         } else {
@@ -277,7 +281,6 @@ export class Game extends Phaser.Scene {
             this.player.anims.play('turn');
         }
 
-        // Fix: Use player.body.blocked.down or player.body.touching.down
         if ((this.cursors.up.isDown || this.cursors.space.isDown) && (this.player.body!.blocked.down || this.player.body!.touching.down)) {
             this.player.setVelocityY(-330);
         }
@@ -305,7 +308,6 @@ export class Game extends Phaser.Scene {
         for (let i = 0; i < 3; i++) {
             graphics.fillStyle(i < count ? 0xff0000 : 0x333333, 1);
             graphics.fillCircle(x - 20 + (i * 20), y, 6);
-            // Border
             graphics.lineStyle(2, 0x000000, 1);
             graphics.strokeCircle(x - 20 + (i * 20), y, 6);
         }
@@ -326,8 +328,8 @@ export class Game extends Phaser.Scene {
 
     emitHostUpdate() {
         const starsData = this.stars.getChildren()
-            .filter((s: any) => s.active)
-            .map((s: any) => ({ x: s.x, y: s.y, bounceY: s.bounceY }));
+            .map((s: any) => ({ x: s.x, y: s.y, bounceY: s.bounceY, active: s.active }))
+            .filter(s => s.active);
             
         const bombsData = this.bombs.getChildren()
             .filter((b: any) => b.active)
@@ -355,7 +357,13 @@ export class Game extends Phaser.Scene {
     }
 
     collectStar(_player: any, star: any) {
-        if (!this.isHost) return;
+        if (!this.isHost) {
+            // Tell host we touched a star
+            const index = this.stars.getChildren().indexOf(star);
+            this.socket.emit('starCollected', { roomCode: this.roomCode, starIndex: index });
+            star.disableBody(true, true); // Visual feedback immediate for client
+            return;
+        }
 
         star.disableBody(true, true);
         this.score += 10;
@@ -409,6 +417,7 @@ export class Game extends Phaser.Scene {
         this.player.body!.enable = false;
         this.playerNameTag.setVisible(false);
         this.playerHearts.clear();
+        this.emitUpdate(); // Final update to tell others I'm dead
         this.checkGameOver();
     }
 

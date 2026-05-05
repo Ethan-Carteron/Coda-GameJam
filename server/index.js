@@ -86,6 +86,14 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('starCollected', ({ roomCode, starIndex }) => {
+        const room = rooms.get(roomCode);
+        if (room) {
+            // Tell the host to remove this star
+            io.to(room.hostId).emit('collectStarAt', starIndex);
+        }
+    });
+
     socket.on('playerUpdate', (data) => {
         // Relay movement and state to others in the room
         socket.to(data.roomCode).emit('playerMoved', {

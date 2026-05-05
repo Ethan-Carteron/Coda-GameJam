@@ -25,6 +25,7 @@ export class Game extends Phaser.Scene {
 
     private stars: Phaser.Physics.Arcade.Group;
     private bombs: Phaser.Physics.Arcade.Group;
+    private deadBodies: Phaser.Physics.Arcade.Group;
     private platforms: Phaser.Physics.Arcade.StaticGroup;
     private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
     
@@ -57,7 +58,10 @@ export class Game extends Phaser.Scene {
         this.load.image('sky', 'sky.png');
         this.load.image('ground', 'platform.png');
         this.load.image('star', 'star.png');
-        this.load.image('bomb', 'bomb.png');
+        this.load.image('death', 'death.png');
+        for (let i = 1; i <= 4; i++) {
+            this.load.image(`bomb${i}`, `bomb${i}.png`);
+        }
         this.load.spritesheet('dude', 'dude.png', { frameWidth: 32, frameHeight: 48 });
     }
 
@@ -66,6 +70,7 @@ export class Game extends Phaser.Scene {
         this.platforms = this.physics.add.staticGroup();
         this.stars = this.physics.add.group();
         this.bombs = this.physics.add.group();
+        this.deadBodies = this.physics.add.group();
 
         this.setupPlatforms();
         this.setupPlayer();
@@ -102,6 +107,7 @@ export class Game extends Phaser.Scene {
         this.physics.add.collider(this.player, this.platforms);
         this.physics.add.collider(this.stars, this.platforms);
         this.physics.add.collider(this.bombs, this.platforms);
+        this.physics.add.collider(this.deadBodies, this.platforms);
         this.physics.add.collider(this.player, this.bombs, this.hitBomb, undefined, this);
     }
 
@@ -217,8 +223,9 @@ export class Game extends Phaser.Scene {
         const currentBombs = this.bombs.getChildren();
         data.bombs.forEach((b: any, index: number) => {
             let bomb = currentBombs[index] as Phaser.Physics.Arcade.Sprite;
-            if (!bomb) bomb = this.bombs.create(b.x, b.y, 'bomb');
+            if (!bomb) bomb = this.bombs.create(b.x, b.y, b.texture);
             
+            bomb.setTexture(b.texture);
             bomb.enableBody(true, b.x, b.y, true, true);
             bomb.setScale(0.3);
             bomb.setCircle(14);
@@ -333,7 +340,9 @@ export class Game extends Phaser.Scene {
 
     emitHostUpdate() {
         const starsData = this.stars.getChildren().map((s: any) => ({ x: s.x, y: s.y, bounceY: s.bounceY, active: s.active }));
-        const bombsData = this.bombs.getChildren().filter((b: any) => b.active).map((b: any) => ({ x: b.x, y: b.y, vx: b.body.velocity.x, vy: b.body.velocity.y }));
+        const bombsData = this.bombs.getChildren().filter((b: any) => b.active).map((b: any) => ({ 
+            x: b.x, y: b.y, vx: b.body.velocity.x, vy: b.body.velocity.y, texture: b.texture.key 
+        }));
         this.socket.emit('hostUpdate', {
             roomCode: this.roomCode, stars: starsData, bombs: bombsData, score: this.gameState.score
         });
@@ -354,8 +363,11 @@ export class Game extends Phaser.Scene {
     }
 
     showDeathMessage(name: string, x: number, y: number) {
-        const txt = this.add.text(x, y, `${name} est mort !`, { fontSize: '24px', color: '#f00', fontStyle: 'bold', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5);
-        this.tweens.add({ targets: txt, y: y - 50, alpha: 0, duration: 3000, onComplete: () => txt.destroy() });
+        const deathSprite = this.deadBodies.create(x, y, 'death');
+        deathSprite.setBounce(0.3).setCollideWorldBounds(true).setAngularVelocity(Phaser.Math.Between(-100, 100));
+        
+        const txt = this.add.text(x, y - 20, `${name} est mort !`, { fontSize: '24px', color: '#f00', fontStyle: 'bold', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5);
+        this.tweens.add({ targets: txt, y: y - 70, alpha: 0, duration: 3000, onComplete: () => txt.destroy() });
     }
 
     collectStar(collector: any, star: any) {
@@ -376,7 +388,11 @@ export class Game extends Phaser.Scene {
         if (this.stars.countActive(true) === 0) {
             this.spawnStars();
             const x = (this.player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
-            const bomb = this.bombs.create(x, 16, 'bomb');
+            
+            // C'est ici que tu peux changer la logique des bombes facilement :
+            const bombKey = `bomb${Phaser.Math.Between(1, 4)}`;
+            
+            const bomb = this.bombs.create(x, 16, bombKey);
             bomb.setScale(0.3);
             bomb.setCircle(14);
             bomb.setBounce(1).setCollideWorldBounds(true).setVelocity(Phaser.Math.Between(-200, 200), 20);

@@ -49,6 +49,7 @@ export class Game extends Phaser.Scene {
         this.gameOver = false;
         this.isSpectator = false;
         this.health = 3;
+        this.score = 0;
     }
 
     preload() {
@@ -108,6 +109,7 @@ export class Game extends Phaser.Scene {
         this.physics.add.collider(this.stars, this.platforms);
         this.physics.add.collider(this.bombs, this.platforms);
 
+        // Standard overlap for Host
         this.physics.add.overlap(this.player, this.stars, this.collectStar, undefined, this);
         this.physics.add.collider(this.player, this.bombs, this.hitBomb, undefined, this);
     }
@@ -229,10 +231,13 @@ export class Game extends Phaser.Scene {
             }
             
             if (s.active) {
-                star.enableBody(true, s.x, s.y, true, true);
-                star.setBounceY(s.bounceY);
+                star.setActive(true).setVisible(true);
+                star.setPosition(s.x, s.y);
+                // On client, we don't necessarily need body to be enabled for visual sync
+                if (star.body) star.body.enable = true;
             } else {
-                star.disableBody(true, true);
+                star.setActive(false).setVisible(false);
+                if (star.body) star.body.enable = false;
             }
         });
 
@@ -269,9 +274,26 @@ export class Game extends Phaser.Scene {
                 this.handleInput();
             }
             this.updateUI();
+
+            // MANUAL OVERLAP CHECK FOR CLIENTS
+            if (!this.isHost) {
+                this.checkManualOverlap();
+            }
         }
 
         this.emitUpdate();
+    }
+
+    checkManualOverlap() {
+        const playerBounds = this.player.getBounds();
+        this.stars.getChildren().forEach((star: any, index: number) => {
+            if (star.active && star.visible) {
+                const starBounds = star.getBounds();
+                if (Phaser.Geom.Intersects.RectangleToRectangle(playerBounds, starBounds)) {
+                    this.collectStar(this.player, star);
+                }
+            }
+        });
     }
 
     handleInput() {
@@ -366,16 +388,18 @@ export class Game extends Phaser.Scene {
     }
 
     collectStar(_player: any, star: any) {
+        const index = this.stars.getChildren().indexOf(star);
+        if (index === -1 || !star.active) return;
+
         if (!this.isHost) {
-            const index = this.stars.getChildren().indexOf(star);
-            if (index !== -1) {
-                this.socket.emit('starCollected', { roomCode: this.roomCode, starIndex: index });
-                star.disableBody(true, true);
-            }
+            // Signal to host
+            this.socket.emit('starCollected', { roomCode: this.roomCode, starIndex: index });
+            // Deactivate locally for feedback
+            star.setActive(false).setVisible(false);
             return;
         }
 
-        if (!star.active) return;
+        // Host logic
         star.disableBody(true, true);
         this.score += 10;
         this.scoreText.setText('Score: ' + this.score);
@@ -421,7 +445,7 @@ export class Game extends Phaser.Scene {
         this.isSpectator = true;
         this.player.setVisible(false);
         this.player.setActive(false);
-        this.player.body!.enable = false;
+        if (this.player.body) this.player.body.enable = false;
         this.playerNameTag.setVisible(false);
         this.playerHearts.clear();
         this.checkGameOver();

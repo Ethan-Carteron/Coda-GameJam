@@ -93,6 +93,7 @@ export class Game extends Phaser.Scene {
         this.player = this.physics.add.sprite(100, 450, 'dude');
         this.player.setBounce(0.2);
         this.player.setCollideWorldBounds(true);
+        this.player.setSize(20, 32).setOffset(6, 16);
         this.playerNameTag = this.add.text(0, 0, '', { fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
         this.playerHearts = this.add.graphics();
     }
@@ -220,7 +221,7 @@ export class Game extends Phaser.Scene {
             
             bomb.enableBody(true, b.x, b.y, true, true);
             bomb.setScale(0.3);
-            (bomb.body as Phaser.Physics.Arcade.Body).updateFromGameObject();
+            bomb.setCircle(14);
             bomb.setBounce(1).setVelocity(b.vx, b.vy);
         });
     }
@@ -377,7 +378,7 @@ export class Game extends Phaser.Scene {
             const x = (this.player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
             const bomb = this.bombs.create(x, 16, 'bomb');
             bomb.setScale(0.3);
-            (bomb.body as Phaser.Physics.Arcade.Body).updateFromGameObject();
+            bomb.setCircle(14);
             bomb.setBounce(1).setCollideWorldBounds(true).setVelocity(Phaser.Math.Between(-200, 200), 20);
         }
     }

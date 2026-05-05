@@ -217,8 +217,10 @@ export class Game extends Phaser.Scene {
         data.bombs.forEach((b: any, index: number) => {
             let bomb = currentBombs[index] as Phaser.Physics.Arcade.Sprite;
             if (!bomb) bomb = this.bombs.create(b.x, b.y, 'bomb');
-            bomb.setScale(0.3)
+            
             bomb.enableBody(true, b.x, b.y, true, true);
+            bomb.setScale(0.3);
+            (bomb.body as Phaser.Physics.Arcade.Body).updateFromGameObject();
             bomb.setBounce(1).setVelocity(b.vx, b.vy);
         });
     }
@@ -374,6 +376,8 @@ export class Game extends Phaser.Scene {
             this.spawnStars();
             const x = (this.player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
             const bomb = this.bombs.create(x, 16, 'bomb');
+            bomb.setScale(0.3);
+            (bomb.body as Phaser.Physics.Arcade.Body).updateFromGameObject();
             bomb.setBounce(1).setCollideWorldBounds(true).setVelocity(Phaser.Math.Between(-200, 200), 20);
         }
     }

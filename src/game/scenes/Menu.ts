@@ -74,7 +74,7 @@ export class Menu extends Phaser.Scene {
 
         // Auto-connect socket
         if (!this.socket) {
-            this.socket = io(window.location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://TON-SERVEUR-RENDER.com');
+            this.socket = io(window.location.hostname === 'localhost' ? 'http://localhost:8081' : 'https://gamjamonline.onrender.com');
             
             this.socket.on('error', (msg: string) => {
                 const errorDiv = document.getElementById('errorMsg');

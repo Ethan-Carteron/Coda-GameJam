@@ -389,7 +389,7 @@ export class Game extends Phaser.Scene {
             const x = (this.player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
             
             // C'est ici que tu peux changer la logique des bombes facilement :
-            const bombKey = `bomb${Phaser.Math.Between(1, 2)}`;
+            const bombKey = `bomb${Phaser.Math.Between(1, 4)}`;
             
             const bomb = this.bombs.create(x, 16, bombKey);
             this.setupBomb(bomb);
@@ -400,23 +400,27 @@ export class Game extends Phaser.Scene {
     setupBomb(bomb: Phaser.Physics.Arcade.Sprite) {
         const texture = bomb.texture.key;
         
-        // On ajuste le scale pour que tout le monde ait la même taille que bomb1 à 0.3
-        // bomb1 (351x217) -> scale 0.3 => ~105px
-        // bomb2 (500x500) -> scale 0.21 => ~105px
+        // On ajuste le scale pour que tout le monde ait la même taille que bomb1 à 0.3 (~105px de large)
         if (texture === 'bomb1') {
             bomb.setScale(0.3);
-            bomb.setCircle(60, 110, 40); // Ajusté pour le visage sur bomb1
+            bomb.setCircle(60, 110, 40);
         } else if (texture === 'bomb2') {
             bomb.setScale(0.21);
-            bomb.setCircle(200, 50, 40); // Ajusté pour le visage sur bomb2
+            bomb.setCircle(200, 50, 40);
+        } else if (texture === 'bomb3') {
+            bomb.setScale(0.07); // 1463 * 0.07 ≈ 102px
+            bomb.setCircle(600, 130, 50);
+        } else if (texture === 'bomb4') {
+            bomb.setScale(0.1); // 1024 * 0.1 ≈ 102px
+            bomb.setCircle(350, 400, 50);
         } else {
-            // Par défaut pour bomb3, bomb4 si elles arrivent
             bomb.setScale(0.3);
             bomb.setCircle(bomb.width / 4, bomb.width / 4, bomb.height / 4);
         }
         
         (bomb.body as Phaser.Physics.Arcade.Body).updateFromGameObject();
         bomb.setBounce(1);
+        bomb.setCollideWorldBounds(true);
     }
 
     hitBomb() {

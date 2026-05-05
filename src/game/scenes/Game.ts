@@ -392,6 +392,7 @@ export class Game extends Phaser.Scene {
             this.spawnStars();
             const x = (this.player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
             const bomb = this.bombs.create(x, 16, 'bomb');
+            bomb.setScale(0.3);
             bomb.setBounce(1).setCollideWorldBounds(true).setVelocity(Phaser.Math.Between(-200, 200), 20);
         }
     }
